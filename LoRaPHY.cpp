@@ -6,51 +6,97 @@
 #include <complex>
 #include <tuple>
 #include <cmath>
+#include <ctime>
+#include "fftw3.h"
+// #include "kiss_fft.h"
+// #include "fftw3.h"
 #define M_PI 3.14159265358979323846
 
 using namespace std;
 
 
+
 // 递归 Cooley-Tukey FFT
-std::vector<std::complex<double>> fft(const std::vector<std::complex<double>>& input, int N) {
-    // 填充或截断输入长度
-    std::vector<std::complex<double>> data(N, 0);
-    int input_size = input.size();
-    for (int i = 0; i < min(N, input_size); ++i)
-        data[i] = input[i];
+// std::vector<std::complex<double>> fft(const std::vector<std::complex<double>>& input, int N) {
+//     if ((N & (N - 1)) != 0) {
+//         throw std::invalid_argument("Input size must be a power of 2");
+//     }
 
-    if (N <= 1)
-        return data;
+//     std::vector<std::complex<double>> data(input);
 
-    // 奇偶分离
-    std::vector<std::complex<double>> even, odd;
-    for (int i = 0; i < N / 2; ++i) {
-        even.push_back(data[i * 2]);
-        odd.push_back(data[i * 2 + 1]);
+//     // Bit-reversal permutation
+//     int j = 0;
+//     for (int i = 1; i < N; ++i) {
+//         int bit = N >> 1;
+//         while (j & bit) {
+//             j ^= bit;
+//             bit >>= 1;
+//         }
+//         j ^= bit;
+
+//         if (i < j) {
+//             std::swap(data[i], data[j]);
+//         }
+//     }
+
+//     // Cooley-Tukey FFT
+//     for (int len = 2; len <= N; len <<= 1) {
+//         double angle = -2 * M_PI / len;
+//         std::complex<double> wlen(cos(angle), sin(angle));
+//         for (int i = 0; i < N; i += len) {
+//             std::complex<double> w(1);
+//             for (int j = 0; j < len / 2; ++j) {
+//                 std::complex<double> u = data[i + j];
+//                 std::complex<double> t = w * data[i + j + len / 2];
+//                 data[i + j] = u + t;
+//                 data[i + j + len / 2] = u - t;
+//                 w *= wlen;
+//             }
+//         }
+//     }
+
+//     return data;
+// }
+
+void fft(vector<complex<double>> &x, int N) {
+    if (N <= 1) return; // 递归终止条件
+
+    if(N > x.size())
+    {
+        for(int i = x.size(); i < N; i++) x.push_back(0.0 + 0.0 * 1i); // padding zero
     }
-
-    // 递归调用
-    auto fft_even = fft(even, N / 2);
-    auto fft_odd = fft(odd, N / 2);
-
-    std::vector<std::complex<double>> output(N);
-    for (int k = 0; k < N / 2; ++k) {
-        std::complex<double> t = std::polar(1.0, -2 * M_PI * k / N) * fft_odd[k];
-        output[k] = fft_even[k] + t;
-        output[k + N / 2] = fft_even[k] - t;
+    // 拆分为偶数和奇数部分
+    vector<complex<double>> even(N / 2), odd(N / 2);
+    for (int i = 0; i < N / 2; i++) {
+        even[i] = x[i * 2];
+        odd[i] = x[i * 2 + 1];
     }
-
-    return output;
+ 
+    // 递归计算 FFT
+    fft(even, N/2);
+    fft(odd, N/2);
+ 
+    // 组合结果
+    for (int k = 0; k < N / 2; k++) {
+        complex<double> t = polar(1.0, -2 * M_PI * k / N) * odd[k]; // 旋转因子 e^(-j2πk/N)
+        x[k] = even[k] + t;
+        x[k + N / 2] = even[k] - t;
+    }
 }
 
-tuple<double, int> topn(vector<double> data)
+
+
+tuple<double, double> topn(vector<double> &data)
 {
     double mm = 0;
-    tuple<double, int> result;
+    tuple<double, double> result;
     for(int i = 0; i < data.size(); i++)
     {
-        if(data[i] > mm) mm = data[i];
-        result = {data[i], i};
+        if(data[i] > mm) 
+        {
+            mm = data[i];
+            result = {data[i], i};
+        }
     }
     return result;
 }
@@ -125,18 +171,18 @@ vector<complex<double>> chirp(bool is_up,int sf,double bw,double fs,double h,dou
     return y;
 };
 
-std::vector<double> resample(const std::vector<double>& x, int p, int q) {
+std::vector<complex<double>> resample(const std::vector<complex<double>>& x, int p, int q) {
     //  上采样：插0
-    std::vector<double> upsampled;
+    std::vector<complex<double>> upsampled;
     upsampled.reserve(x.size() * p);
     for (auto val : x) {
         upsampled.push_back(val);
-        for (int i = 1; i < p; ++i) upsampled.push_back(0.0);
+        for (int i = 1; i < p; ++i) upsampled.push_back(0.0 + 1i * 0.0);
     }
 
     //  下采样
-    std::vector<double> y;
-    for (size_t i = 0; i < upsampled.size(); i += q) {
+    std::vector<complex<double>> y;
+    for (int i = 0; i < upsampled.size(); i += q) {
         y.push_back(upsampled[i]);
     }
 
@@ -178,7 +224,7 @@ class Param
             has_header = 1;
             crc = 1;
             hamming_decoding_en = true;
-            zero_padding_ratio = 10;
+            zero_padding_ratio = 4;
             cfo = 0;
 
             // %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -221,29 +267,79 @@ class Param
         
 };
 
-tuple<double, int> dechirp(int x, bool is_up, Param p, vector<complex<double>> signal);
+tuple<double, double> dechirp(int x, bool is_up, Param &p, vector<complex<double>> &signal)
+{
+    fftw_plan p_fft;
+    fftw_complex *din, *dout;
+    din = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * p.fft_len);
+	dout = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * p.fft_len);
+    if(!is_up) 
+    {
+        for(int i = 0; i < p.upchirp.size(); i++)
+        {
+            din[i][0] = (signal[x + i] * p.upchirp[i]).real();
+            din[i][1] = (signal[x + i] * p.upchirp[i]).imag();
+        }
+    }
+    else
+    {
+        for(int i = 0; i < p.upchirp.size(); i++)
+        {
+            din[i][0] = (signal[x + i] * p.downchirp[i]).real();
+            din[i][1] = (signal[x + i] * p.downchirp[i]).imag();
+        }
+    }
+
+    for(int i = p.upchirp.size(); i < p.fft_len; i++)
+    {
+        din[i][0] = 0;
+        din[i][1] = 0;
+    }
+    
+
+    // fft(c, p.fft_len);
+    p_fft = fftw_plan_dft_1d(p.fft_len, din, dout, FFTW_FORWARD, FFTW_ESTIMATE);
+    fftw_execute(p_fft); /* repeat as needed */
+	fftw_destroy_plan(p_fft);
+	fftw_cleanup();
+
+    vector<double> ft_1;
+    for (int i = 0; i < p.bin_num; i++) {
+        // ft_1.push_back(sqrt(out[i].i * out[i].i + out[i].r * out[i].r) + sqrt(out[i+ p.bin_num].i * out[i+ p.bin_num].i + out[i+ p.bin_num].r * out[i+ p.bin_num].r));
+        ft_1.push_back(sqrt(dout[i][0]*dout[i][0] + dout[i][1]*dout[i][1]) + sqrt(dout[i+p.bin_num][0]*dout[i+p.bin_num][0] + dout[i+p.bin_num][1]*dout[i+p.bin_num][1]));
+    }
+    tuple<double, double>pk = topn(ft_1);
+    return pk;
+};
 
 
-int detect(int start_idx, vector<complex<double>> signal, Param p)
+int detect(int start_idx, vector<complex<double>> &signal, Param &p)
 {
     int ii = start_idx;
     vector<int> pk_bin_list;
-    int x;
+    int x = 0;
     while(ii <= signal.size() - p.sample_num * p.preamble_len)
     {
         if(pk_bin_list.size() == p.preamble_len - 1)
         {
-            x = ii - round((pk_bin_list.back() - 1) / p.zero_padding_ratio * 2);
+            x = ii - round((pk_bin_list.back()) / p.zero_padding_ratio * 2);
             return x;
         }
-        tuple<double, int> pk0 = dechirp(ii, 1, p, signal);
+        tuple<double, double> pk0 = dechirp(ii, 1, p, signal);
+        // cout << get<0>(pk0) << '\t' << get<1>(pk0)<<endl;
         if(!(pk_bin_list.empty()))
         {
-            int bin_diff = (pk_bin_list.back() - get<1>(pk0)) % p.bin_num;
-            if(bin_diff > p.bin_num / 2) bin_diff = p.bin_num - bin_diff;
+            int bin_diff = fmod(abs(pk_bin_list.back() - get<1>(pk0)), p.bin_num);
             
-            
-            if(bin_diff <= p.zero_padding_ratio) pk_bin_list.push_back(get<1>(pk0));
+            if(bin_diff > p.bin_num / 2) 
+            {
+                bin_diff = p.bin_num - bin_diff;
+            }
+            // cout<<bin_diff<<endl;
+            if(bin_diff <= p.zero_padding_ratio) 
+            {
+                pk_bin_list.push_back(get<1>(pk0));
+            }
             else
             {
                 pk_bin_list.clear();
@@ -252,151 +348,269 @@ int detect(int start_idx, vector<complex<double>> signal, Param p)
         }
         else 
         {
-            pk_bin_list.clear();
             pk_bin_list.push_back(get<1>(pk0));
         }
 
         ii += p.sample_num;
-        cout<<pk_bin_list.size();
+        // cout<<pk_bin_list.back()<<endl;
     }
     x = -1;
-    for(int pp = 0; pp < pk_bin_list.size();pp++) cout<<pk_bin_list[pp]<<endl;
     return x;
 }
 
 
 
 
+int sync(int x, vector<complex<double>> &signal, Param &p)
+{
+    bool found = false;
+    while(x < signal.size() - p.sample_num)
+    {
+        tuple<double, double> up_peak, down_peak;
+        up_peak = dechirp(x, true, p, signal);
+        down_peak = dechirp(x, false, p, signal);
+        if(abs(get<0>(down_peak)) > abs(get<0>(up_peak)))
+        {
+            found = true;
+        }
+        x += p.sample_num;
+        if(found) break;
+        
+    }
+    if(!found) return -1;
+    tuple<double, double> pkd = dechirp(x, false, p, signal);
+    int to = 0;
+    if(get<1>(pkd) > p.bin_num / 2)
+    {
+        to = round((get<1>(pkd) - p.bin_num) / p.zero_padding_ratio);
+    }
+    else
+    {
+        to = round((get<1>(pkd)) / p.zero_padding_ratio);
+    }
+    x += to;
+    tuple<double, double> pku = dechirp(x - 4*p.sample_num, true, p, signal);
+    p.preamble_bin = get<1>(pku);
+    if(p.preamble_bin > p.bin_num / 2)
+    {
+        p.cfo = double(p.preamble_bin-p.bin_num)*p.bw/double(p.bin_num);
+    }
+    else
+    {
+        p.cfo = double(p.preamble_bin)*p.bw/double(p.bin_num);
+    }
+    pku = dechirp(x-p.sample_num, true, p, signal);
+    pkd = dechirp(x-p.sample_num, false, p, signal);
+    if(abs(get<0>(pku) > abs(get<0>(pkd))))
+    {
+        x += round(2.25*p.sample_num);
+    }
+    else
+    {
+        x += round(1.25*p.sample_num);
+    }
 
-// };
-
-// int sync(int start)
-// {
-//     bool found = false;
-//     while(x < signal.size() - p.sample_num)
-//     {
-//         up_peak = dechirp(x);
-//         down_peak = dechirp(x, false);
-//         if(abs(doun_peak))
-
-
-// };
+    return x;
+};
 
 
 
 
 // bool parse_header(const vector<int>& symbols)
 // {
+//     symbols = self.dynamic_compensation(data);
 
-// };
-// int calc_sym_num(int payload_len)
-// {
+//             % gray coding
+//             symbols_g = self.gray_coding(symbols);
 
+//             % deinterleave
+//             codewords = self.diag_deinterleave(symbols_g(1:8), self.sf-2);
+//             % parse header
+//             nibbles = self.hamming_decode(codewords, 8);
+//             self.payload_len = double(nibbles(1)*16 + nibbles(2));
+//             self.crc = double(bitand(nibbles(3), 1));
+//             self.cr = double(bitshift(nibbles(3), -1));
+//             % we only calculate header checksum on the first three nibbles
+//             % the valid header checksum is considered to be 5 bits
+//             % other 3 bits require further reverse engineering
+//             header_checksum = [bitand(nibbles(4), 1); de2bi(nibbles(5), 4, 'left-msb')];
+//             header_checksum_calc = self.header_checksum_matrix * gf(reshape(de2bi(nibbles(1:3), 4, 'left-msb'), [], 1));
+// %             header_checksum_calc
+// %             header_checksum
+//             if any(header_checksum ~= header_checksum_calc)
+//                 warning('Invalid header checksum!');
+//                 is_valid = 0;
+//             else
+//                 is_valid = 1;
+//             end
+//         end
 // };
-// vector<int> dynamic_compensation(const vector<int>& symbols)
-// {
 
-// };
-tuple<double, int> dechirp(int x, bool is_up, Param p, vector<complex<double>> signal)
+
+double calc_sym_num(Param &p)
 {
-    vector<complex<double>> c;
-    if(is_up) c = p.upchirp;
-    else c = p.downchirp;
-    vector<complex<double>> subvec(signal.begin() + x, signal.begin() + x + p.sample_num - 1);
-    vector<complex<double>> mult;
-    for(int i = 0; i < c.size(); i++) mult.push_back(subvec[i] * c[i]);
-    vector<complex<double>> ft = fft(mult, p.fft_len);
-    vector<complex<double>> slice1(ft.begin(), ft.begin()+p.bin_num);
-    vector<complex<double>> slice2(ft.begin()+p.fft_len - p.bin_num+1, ft.begin()+p.fft_len);
-    vector<double> ft_1;
-    for(int i = 0; i<p.bin_num; i++) ft_1.push_back(abs(slice1[i])+abs(slice2[i]));
-    for(int i = 0; i<p.bin_num; i++) ft_1.push_back(i);
-    tuple<double, int>pk = topn(ft_1);
-    return pk;
+    return double(8 + max((4+p.cr)*ceil(double((2*p.payload_len - p.sf+7+4*p.crc-5*(1-p.has_header))) / double(p.sf-2*p.ldr)), 0.0));
 };
 
 
-vector<int32_t> read_file(string filename)
+vector<double> dynamic_compensation(const vector<double>& data, Param &p)
 {
-    vector<int32_t> result;
+    vector<double> symbols(data.size());
+    for(int i = 0; i < data.size(); i++)
+    {
+        symbols[i] = (fmod((data[i] - (1 + i) * pow(2, p.sf) * p.cfo / p.rf_freq), (pow(2, p.sf))));
+    }
+
+            if(p.ldr)
+            {
+                double bin_offset = 0;
+                double v_last = 1;
+                double v;
+
+                for(int i = 0; i < (symbols.size()); i++)
+                {
+                    v = symbols[i];
+                    double bin_delta = fmod((fmod((v-v_last), 4) + 4), 4);
+                    if(bin_delta < 2) bin_offset = bin_offset - bin_delta;
+                    else bin_offset = bin_offset - bin_delta + 4;
+                    v_last = v;
+                    symbols[i] = fmod((v+bin_offset), (pow(2, p.sf)));
+                }
+            }
+    return symbols;
+}
+
+
+
+vector<int> demodulate(vector<complex<double>> &signal, Param &p)
+{
+    p.cfo = 0;
+    vector<int> symbols_m;
+    vector<double> cfo_m;
+    vector<double> netid_m;
+    int x = 0;
+    signal = resample(signal, 1, 2);
+    while(x < signal.size())
+    {
+        
+        x = detect(x, signal, p);
+        if(x < 0) break;
+        // cout<<x<<endl;
+        x = sync(x, signal, p);
+        // cout<<x<<endl;
+
+        // double pk_netid1 = dechirp(round(x - 4.25*sample_num));
+        // double pk_netid2 = dechirp(round(x - 4.25*sample_num));
+        // netid_m.push_back([mod((pk_netid1(2)+ bin_num- preamble_bin)/ zero_padding_ratio, 2^ sf), mod((pk_netid2(2)+ bin_num- preamble_bin)/ zero_padding_ratio, 2^ sf)])
+        vector<double> symbols;
+        vector<tuple<double, double>> pk_list;
+        
+        if (x > (signal.size() - 8*p.sample_num + 1)) return {-1};
+        for(int ii = 0; ii < 8; ii++)
+        {
+            tuple<double, double> pk = dechirp(x+ii*p.sample_num, 1, p, signal);
+            pk_list.push_back(pk);
+            // cout<<'p' << '\t' << get<1>(pk)<<endl;
+            symbols.push_back(fmod(((get<1>(pk)+p.bin_num-p.preamble_bin)/p.zero_padding_ratio) , (pow(2,p.sf))));
+            // cout<< (get<1>(pk)+p.bin_num-p.preamble_bin)/p.zero_padding_ratio << endl;
+        };
+        // for(int cnt = 0; cnt < symbols.size(); cnt++) cout<<symbols[cnt]<<endl;
+
+        if(p.has_header)
+        {
+            // bool is_valid = parse_header(symbols);
+            bool is_valid = true;
+            if(!is_valid)
+            {
+                x = x + 7*p.sample_num;
+                continue;
+            };
+        };
+        double sym_num = calc_sym_num(p);
+        int sym_num = 28;
+        // cout<<"sym_num  "<<sym_num<<endl;
+
+        if (x > (signal.size() - sym_num * p.sample_num + 1)) return {-1};
+        for(int ii = 8; ii<sym_num; ii++)
+        {
+            tuple<double, double> pk = dechirp(x+ii*p.sample_num, 1, p, signal);
+            pk_list.push_back(pk);
+            symbols.push_back(fmod(((get<1>(pk)+p.bin_num-p.preamble_bin)/p.zero_padding_ratio), (pow(2,p.sf))));
+        };
+
+        x += sym_num * p.sample_num;
+        // cout<<"cfo "<<p.cfo<<endl;
+        symbols = dynamic_compensation(symbols, p);
+        // for(int iii = 0; iii < symbols.size(); iii++) cout<<"sym  "<<symbols[iii]<<endl;
+
+        for(int jj = 0; jj < symbols.size(); jj++)
+        {
+            symbols_m.push_back(round(fmod(symbols[jj] , (pow(2, p.sf)))));
+            cfo_m.push_back(p.cfo);
+        };
+        if(symbols_m.empty()) printf("No preamble detected!");
+    }
+
+    return symbols_m;
+}
+
+// vector<int32_t> read_file(string filename)
+// {
+//     vector<int32_t> result;
     
+//     ifstream infile(filename, ios::binary);
+//     if (!infile.is_open()) {
+//         cerr << "Cannot open file: " << filename << endl;
+//         return result;
+//     }
+
+//     int32_t buffer;
+//     int count = 0;
+//     while (infile.read(reinterpret_cast<char*>(&buffer), sizeof(buffer))) {
+//         if(count >= 8) result.push_back((buffer));
+//         count++;
+//     }
+//     infile.close();
+//     return result;
+
+// };
+
+
+vector<complex<double>> read_file(const string& filename) {
+    vector<complex<double>> result;
+
     ifstream infile(filename, ios::binary);
     if (!infile.is_open()) {
         cerr << "Cannot open file: " << filename << endl;
         return result;
     }
 
-    int32_t buffer;
+    int32_t real_part, imag_part;
     int count = 0;
-    while (infile.read(reinterpret_cast<char*>(&buffer), sizeof(buffer))) {
-        if(count >= 8) result.push_back((buffer));
+
+    while (infile.read(reinterpret_cast<char*>(&real_part), sizeof(int32_t))) {
+        if (!infile.read(reinterpret_cast<char*>(&imag_part), sizeof(int32_t))) {
+            cerr << "Incomplete complex number at the end of file." << endl;
+            break;
+        }
+
+        // 跳过前 4 个复数（等价于前 8 个 int32_t）
+        if (count >= 4) {
+            result.emplace_back(static_cast<double>(real_part), static_cast<double>(imag_part));
+        }
+
         count++;
     }
+
     infile.close();
     return result;
-
-};
-
-// vector<int> demodulate(vector<complex<double>> signal, Param pr)
-// {
-//     vector<int> data;
-//     pr.cfo = 0;
-//     vector<int> symbols_m;
-//     vector<double> cfo_m;
-//     vector<double> netid_m;
-//     int x = 1;
-//     while(x < signal.size())
-//     {
-//         x = detect(x);
-//         if(x < 0) break;
-
-//         x = sync(x);
-
-//         // double pk_netid1 = dechirp(round(x - 4.25*sample_num));
-//         // double pk_netid2 = dechirp(round(x - 4.25*sample_num));
-//         // netid_m.push_back([mod((pk_netid1(2)+ bin_num- preamble_bin)/ zero_padding_ratio, 2^ sf), mod((pk_netid2(2)+ bin_num- preamble_bin)/ zero_padding_ratio, 2^ sf)])
-//         vector<int> symbols;
-//         vector<tuple<double, int>> pk_list;
-//         if (x > signal.size() - 8*pr.sample_num + 1) return vector<int>(-1);
-//         for(int ii = 0; ii < 8; ii++)
-//         {
-//             tuple<double, int> pk = dechirp(x+ii*pr.sample_num);
-//             pk_list.push_back(pk);
-//             symbols.push_back(((get<1>(pk)+pr.bin_num-pr.preamble_bin)/pr.zero_padding_ratio) % 2^pr.sf);
-//         };
-
-//         if(pr.has_header)
-//         {
-//             bool is_valid = parse_header(symbols);
-//             if(~is_valid)
-//             {
-//                 x = x + 7*pr.sample_num;
-//                 continue;
-//             };
-//         };
-//         int sym_num = calc_sym_num(pr.payload_len);
-//         if (x > signal.size() - sym_num * pr.sample_num + 1) return vector<int>(-1);
-//         for(int ii = 8; ii<sym_num; ii++)
-//         {
-//             tuple<double, int> pk = dechirp(x+ii*pr.sample_num);
-//             pk_list.push_back(pk);
-//             symbols.push_back(((get<1>(pk)+pr.bin_num-pr.preamble_bin)/pr.zero_padding_ratio) % 2^pr.sf);
-//         };
-//         x += sym_num * pr.sample_num;
-//         symbols = dynamic_compensation(symbols);
-//         for(int jj = 0; jj < symbols.size(); jj++)
-//         {
-//             symbols_m.push_back(round(symbols[jj] % (2^pr.sf)));
-//             cfo_m.push_back(pr.cfo);
-//         };
-//         if(symbols_m.empty()) printf("No preamble detected!");
-//     }
-
-//     return data;
-// };
+}
 
 
-void export_to_csv(const vector<complex<double>>& signal, const string& filename) {
+
+
+void export_to_csv(const vector<complex<double>>& signal, const string& filename)
+{
     ofstream file(filename);
     for (const auto& val : signal) {
         file << real(val) << "," << imag(val) << "\n";
@@ -406,15 +620,9 @@ void export_to_csv(const vector<complex<double>>& signal, const string& filename
 
 int main()
 {
-    // vector<int32_t> signal_int32 = read_file("M:\\lora_modulation\\LoRaPHY\\ebyte_1.2025-07-31T08_04_15_136.sdriq");
-    // vector<complex<double>> signal;
-    // for(int i = 0; i < signal_int32.size(); i+=2)
-    // {
-    //     signal.push_back(complex<double>(static_cast<double>(signal_int32[i])/65536 / 65536, static_cast<double>(signal_int32[i+1])/65536 / 65536));
-    // }
-    // cout<<signal.size();
-    vector<complex<double>> signal;
-    double fc = 850.150e3;
+    double start_time = clock();
+    vector<complex<double>> signal = read_file("M:\\lora_modulation\\LoRaPHY\\iqdata\\ebyte_1.2025-07-31T08_04_15_136.sdriq");
+    double fc = 850.150e6;
     double bw = 500e3;
     int sf = 11;
     double fs = 2e6;
@@ -425,19 +633,22 @@ int main()
     bool ldr = 1;                // 强制使用ldr，具体在loraphy.m的init()
     Param p1(fc,sf,bw,fs,ldr);
     vector<int> data;
-    // data = demodulate(signal, p1);
+    
+    // signal = resample(signal, 1, 2);
+    // cout<<signal.size()<<endl;
+    data = demodulate(signal, p1);
+    double end_time = clock();
+    cout<<"time:"<<(end_time - start_time) /  CLOCKS_PER_SEC<<endl;
+    for(int i = 0; i < data.size(); i++) cout<<data[i]<<endl;
+    // int outp = detect(0, signal, p1);
+    // int synp = sync(outp, signal, p1);
+    // cout<<outp<<endl;
+    // cout<<synp<<endl;
     // vector<complex<double>> upchirp = chirp(true, p1.sf, p1.bw, 2 * p1.bw, 0, p1.cfo, 0, 1);
     // export_to_csv(upchirp, "M:\\lora_modulation\\LoRaPHY\\shit.csv");
 
     // export_to_csv(signal, "M:\\lora_modulation\\LoRaPHY\\newshit.csv");
-    signal = p1.upchirp;
-    for(int ppp = 0; ppp < 19; ppp++) signal.insert(signal.end(), p1.upchirp.begin(), p1.upchirp.end());
-    int detect_res = 98739;
-    detect_res = detect(0, signal, p1);
-    cout<<detect_res<<endl;
-    cout << signal.size()<<endl;
-    cout << p1.upchirp.size();
-    // tuple<double, int> pk = dechirp(0, 1, p1, signal);
+    // tuple<double, double> pk = dechirp(0, 1, p1, signal);
     // cout<<get<0>(pk)<<'\t'<<get<1>(pk);
     // export_to_csv(signal, "M:\\lora_modulation\\LoRaPHY\\topn_of_chirp.csv");
 

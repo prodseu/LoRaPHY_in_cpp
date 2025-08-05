@@ -1,0 +1,27 @@
+rf_freq = 490e6;    % 载波频率，主要用于纠正采样频偏（SFO），在仿真中可忽略
+sf = 10;             % 扩频因子
+bw = 200e3;         % 带宽
+fs = 2.4e6;           % 采样率
+
+phy = LoRaPHY(rf_freq, sf, bw, fs);
+phy.has_header = 1;         % explicit header 模式
+phy.cr = 1;                 % code rate = 4/8 (1:4/5 2:4/6 3:4/7 4:4/8)
+phy.crc = 1;                % 允许 payload CRC
+phy.preamble_len = 8;       % 前导码： 8 basic upchirps
+
+% 编码4个bytes [1 2 3 4]
+symbols = phy.encode((1:4)');
+fprintf("[encode] symbols:\n");
+disp(symbols);
+
+% 基带调制
+sig = phy.modulate(symbols);
+sig = [zeros(length())]
+
+% 画出时频图
+LoRaPHY.spec(sig, fs, bw, sf);
+
+% 解调
+[symbols_d, cfo, netid] = phy.demodulate(sig);
+fprintf("[demodulate] symbols:\n");
+disp(symbols_d);
